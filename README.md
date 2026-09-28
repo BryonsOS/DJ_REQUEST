@@ -10,7 +10,7 @@ No framework, no build step. Everything is in `request-portal.html`.
 ## What it does
 
 - **Guest form** — scan the QR, submit a song (artist, name, and a note optional).
-- **Booth dashboard** (`#booth`, PIN-gated) — live queue with New / Played /
+- **Booth dashboard** (`#booth`, sign-in required) — live queue with New / Played /
   Declined / All tabs, plus a **Top requests** view ranked by demand.
 - **Library check** — matches each request against your track library and flags
   it *In library* (even if you only own a remix or extended mix) or links you to
@@ -39,8 +39,13 @@ No framework, no build step. Everything is in `request-portal.html`.
    alter publication supabase_realtime add table public.requests;
    ```
 
+   Then **lock it down**: create the booth user (Authentication → Users → Add
+   user, auto-confirm), put its email into `supabase/booth-auth.sql`, and run
+   that file. Guests can then only *add* requests; only the booth account can
+   read the queue or change a status.
+
 2. **Add your keys** to the `CONFIG` block at the top of `request-portal.html`
-   (project URL + publishable key, plus your booth PIN).
+   (project URL + publishable key, and optionally the booth email).
 
 3. **Deploy** — drag `request-portal.html` onto https://app.netlify.com/drop.
    HTTPS is required. That's it.
@@ -49,7 +54,8 @@ Leave the keys blank to run in local **demo mode** (same-browser only) while tes
 
 ## At the gig
 
-- iPad → `your-site/#booth`, enter PIN, Add to Home Screen, turn alerts on.
+- iPad → `your-site/#booth`, sign in with the booth account (it stays signed
+  in), Add to Home Screen, turn alerts on.
 - Set the gig name, then tap **QR code** — it bakes the gig name into the guest
   link so every request is tagged to that event.
 - Guests scan → requests land on the booth.
@@ -62,7 +68,8 @@ Everything lives in one `CONFIG` object at the top of the HTML file:
 | --- | --- |
 | `SUPABASE_URL` | Supabase project URL (blank = demo mode) |
 | `SUPABASE_ANON_KEY` | Supabase publishable key — safe in client code |
-| `BOOTH_PIN` | Booth access PIN (client-side convenience, not real security) |
+| `BOOTH_EMAIL` | Optional — pre-fills the booth sign-in email |
+| `BOOTH_PIN` | Demo mode only — the live booth uses Supabase Auth |
 | `GIG_NAME` | Default event label |
 
 ## Development

@@ -40,7 +40,12 @@
          alter publication supabase_realtime add table requests;
 
     2. Paste your project URL + anon key into CONFIG below.
-    3. Set your own BOOTH_PIN. Deploy. Done.
+    3. Lock it down: run supabase/booth-auth.sql (guests can only insert;
+       only the booth's Supabase Auth user can read/update). Deploy. Done.
+
+    NOTE: the SQL above is the original open setup. booth-auth.sql replaces
+    its read/update policies — without it, anyone with the page can read and
+    change every request.
 
   No keys filled in?  It runs in LOCAL DEMO MODE so you can try the
   whole flow first. Demo mode only syncs tabs on the same browser —
@@ -52,7 +57,8 @@
   const CONFIG = {
     SUPABASE_URL:      "https://mhktyejanikvdnjbndgi.supabase.co",
     SUPABASE_ANON_KEY: "sb_publishable_ghD1UY99uWhrEyGqIzoRXA_wn3-_9kh",  // publishable key — safe in client code
-    BOOTH_PIN:         "6000",          // change this if you like
+    BOOTH_EMAIL:       "",              // optional: pre-fills the booth sign-in (password lives in Supabase Auth)
+    BOOTH_PIN:         "6000",          // demo mode only — live booth signs in with Supabase Auth
     GIG_NAME:          "Tonight's Set"
   };
 </script>
@@ -383,6 +389,7 @@
     <button class="tinybtn" id="qrBtn"><svg viewBox="0 0 24 24" fill="none"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>QR code</button>
     <button class="tinybtn" id="alertBtn" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="alertLabel">Alerts off</span></button>
     <button class="tinybtn" id="testBtn" title="Play a test alert">Test</button>
+    <button class="tinybtn hidden" id="signOutBtn" title="Sign the booth out">Sign out</button>
     <input type="file" id="libFile" accept=".csv,.txt" class="hidden">
   </div>
 
@@ -401,7 +408,8 @@
 <div id="pinModal" class="scrim hidden">
   <div class="modal pinpad">
     <h3>Booth access</h3>
-    <p>Enter the PIN to open the live queue.</p>
+    <p id="pinLede">Enter the PIN to open the live queue.</p>
+    <input id="emailInput" class="hidden" type="email" autocomplete="username" placeholder="Email" aria-label="Email" style="letter-spacing:normal;font-size:1rem;margin-bottom:10px">
     <input id="pinInput" type="password" inputmode="numeric" maxlength="8" placeholder="••••" aria-label="PIN">
     <div class="err" id="pinErr"></div>
     <div class="row"><button class="submit" id="pinGo">Open booth</button></div>
@@ -453,22 +461,39 @@
     });
   }
 
+  // Live mode: guests only ever insert. Reading the queue + realtime need the booth's
+  // Supabase Auth session (RLS allows select/update for that user only).
+  let liveChan = null;
   async function initBackend(){
     if(LIVE){
       try{
         await loadSupabase();
         sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
-        const {data} = await sb.from("requests").select("*").order("created_at",{ascending:false});
-        requests = data || [];
-        sb.channel("requests-live")
-          .on("postgres_changes",{event:"*",schema:"public",table:"requests"},payload=>{
-            applyChange(payload); notify();
-          }).subscribe();
-        notify();
-      }catch(err){ console.error("Supabase init failed, falling back to demo:",err); startDemo(); }
+        const {data:{session}} = await sb.auth.getSession();
+        if(session){ sessionStorage.setItem("rp_booth_ok","1"); await startBooth(); }
+        else sessionStorage.removeItem("rp_booth_ok");
+        sb.auth.onAuthStateChange(evt=>{
+          if(evt==="SIGNED_OUT"){ stopBooth(); sessionStorage.removeItem("rp_booth_ok"); showView(); }
+        });
+      }catch(err){ console.error("Supabase init failed, falling back to demo:",err); sb=null; startDemo(); }
     } else {
       startDemo();
     }
+  }
+
+  async function startBooth(){
+    if(!sb) return;
+    await refetch();
+    if(!liveChan){
+      liveChan = sb.channel("requests-live")
+        .on("postgres_changes",{event:"*",schema:"public",table:"requests"},payload=>{
+          applyChange(payload); notify();
+        }).subscribe();
+    }
+  }
+  function stopBooth(){
+    if(liveChan){ sb.removeChannel(liveChan); liveChan=null; }
+    requests=[]; notify();
   }
 
   function applyChange(p){
@@ -518,10 +543,14 @@
 
   async function setStatus(id,status){
     const r = requests.find(x=>x.id===id); if(!r) return;
+    const prev = r.status;
     r.status = status;
-    if(LIVE && sb){ await sb.from("requests").update({status}).eq("id",id); }
-    else { if(bc) bc.postMessage({type:"update",row:r}); }
     notify();
+    if(LIVE && sb){
+      const {error} = await sb.from("requests").update({status}).eq("id",id);
+      if(error){ console.error(error); r.status=prev; notify(); toast("Couldn't update — are you still signed in?"); }
+    }
+    else { if(bc) bc.postMessage({type:"update",row:r}); }
   }
 
   /* ---------------- library cross-check ---------------- */
@@ -700,7 +729,7 @@
     }catch(e){ paintWake(false); }
   }
   async function refetch(){
-    if(LIVE && sb){
+    if(LIVE && sb && sessionStorage.getItem("rp_booth_ok")){
       try{ const {data}=await sb.from("requests").select("*").order("created_at",{ascending:false}); if(data){ requests=data; notify(); } }catch(e){}
     }
   }
@@ -867,6 +896,7 @@
       $("#guestView").classList.add("hidden");
       $("#boothView").classList.remove("hidden");
       if(!LIVE) $("#demoBar").classList.remove("hidden");
+      $("#signOutBtn").classList.toggle("hidden", !sb);
       renderBooth();
       acquireWake();
     } else {
@@ -876,19 +906,43 @@
   }
 
   /* ---------------- PIN gate ---------------- */
+  // Live: real Supabase Auth sign-in (the session persists, so the iPad stays signed in).
+  // Demo: the old client-side PIN, since there's no backend to protect.
   function openPin(){
+    if(sb){
+      $("#pinLede").textContent="Sign in with the booth account to open the live queue.";
+      $("#emailInput").classList.remove("hidden");
+      if(!$("#emailInput").value) $("#emailInput").value=CONFIG.BOOTH_EMAIL||"";
+      Object.assign($("#pinInput"),{placeholder:"Password",inputMode:"text",maxLength:128,autocomplete:"current-password"});
+      $("#pinInput").setAttribute("aria-label","Password");
+      $("#pinInput").style.letterSpacing="normal"; $("#pinInput").style.fontSize="1rem";
+    }
     $("#pinModal").classList.remove("hidden");
-    setTimeout(()=>$("#pinInput").focus(),50);
+    setTimeout(()=>($("#emailInput").classList.contains("hidden")||$("#emailInput").value ? $("#pinInput") : $("#emailInput")).focus(),50);
   }
-  $("#pinGo").onclick=()=>{
-    if($("#pinInput").value===CONFIG.BOOTH_PIN){
-      sessionStorage.setItem("rp_booth_ok","1");
-      $("#pinModal").classList.add("hidden");
-      if(alertsOn) unlockAudio();
-      showView();
+  function unlockBooth(){
+    sessionStorage.setItem("rp_booth_ok","1");
+    $("#pinModal").classList.add("hidden"); $("#pinErr").textContent=""; $("#pinInput").value="";
+    if(alertsOn) unlockAudio();
+    showView();
+  }
+  $("#pinGo").onclick=async()=>{
+    if(sb){
+      const email=$("#emailInput").value.trim(), password=$("#pinInput").value;
+      if(!email||!password){ $("#pinErr").textContent="Enter email and password."; return; }
+      $("#pinGo").disabled=true; $("#pinErr").textContent="";
+      const {error}=await sb.auth.signInWithPassword({email,password});
+      $("#pinGo").disabled=false;
+      if(error){ $("#pinErr").textContent="Sign-in failed. Check email and password."; $("#pinInput").value=""; $("#pinInput").focus(); return; }
+      sessionStorage.setItem("rp_booth_ok","1");   // before startBooth — refetch() checks it
+      await startBooth();
+      unlockBooth();
+    } else if($("#pinInput").value===CONFIG.BOOTH_PIN){
+      unlockBooth();
     } else { $("#pinErr").textContent="Wrong PIN. Try again."; $("#pinInput").value=""; $("#pinInput").focus(); }
   };
   $("#pinInput").addEventListener("keydown",e=>{ if(e.key==="Enter") $("#pinGo").click(); });
+  $("#emailInput").addEventListener("keydown",e=>{ if(e.key==="Enter") $("#pinInput").focus(); });
 
   /* ---------------- guest form ---------------- */
   function submitRequest(){
@@ -980,6 +1034,8 @@
       refetch();       // pull anything we missed while throttled/asleep
     }
   });
+
+  $("#signOutBtn").onclick=()=>{ if(sb) sb.auth.signOut(); };   // onAuthStateChange handles the rest
 
   /* demo view switch */
   $$("#demoBar .switch button").forEach(b=>b.onclick=()=>{

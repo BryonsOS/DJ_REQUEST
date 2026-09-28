@@ -24,7 +24,8 @@ All config is a single `CONFIG` object at the top of `request-portal.html`:
 
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY` — the publishable key (safe in client code).
   If both are blank the app runs in local **demo mode** (same-browser only).
-- `BOOTH_PIN` — gate for the booth view. Client-side only, convenience not security.
+- `BOOTH_EMAIL` — optional; pre-fills the booth sign-in.
+- `BOOTH_PIN` — demo mode only. The live booth signs in with Supabase Auth.
 - `GIG_NAME` — default event label.
 
 ## Backend (Supabase)
@@ -32,8 +33,12 @@ All config is a single `CONFIG` object at the top of `request-portal.html`:
 - Project ref: `mhktyejanikvdnjbndgi` (Bryon's general project, shared org).
 - Table: `public.requests` (id, created_at, song, artist, guest, note, status,
   gig). `status` is `new` | `played` | `declined`.
-- RLS is ON with open read/insert/update policies (public request board — no
-  auth for guests). No delete policy by design.
+- RLS is ON, set by `supabase/booth-auth.sql`: anon/guests may only INSERT
+  (status must be `new`, lengths capped). SELECT and UPDATE (status column only)
+  are limited to the booth's Supabase Auth user via `public.is_booth()`, which
+  pins one email — the project is shared, so "any authenticated user" is not
+  enough. No deletes. Realtime respects RLS, so only the signed-in booth gets
+  live events.
 - Realtime: the table is in the `supabase_realtime` publication. That's what
   pushes new requests to the booth live. If you recreate the table, re-run
   `alter publication supabase_realtime add table public.requests;`.
@@ -45,8 +50,11 @@ All config is a single `CONFIG` object at the top of `request-portal.html`:
 
 ## App structure (all inside request-portal.html)
 
-- **Two views**, switched by URL hash: `#booth` (dashboard, PIN-gated,
-  session-remembered); any other URL shows the guest form.
+- **Two views**, switched by URL hash: `#booth` (dashboard; Supabase Auth
+  email/password sign-in, session persists; demo mode uses the PIN); any other
+  URL shows the guest form.
+- **Guests never read.** The queue is fetched and the realtime channel opened
+  only after the booth signs in (`startBooth` / `stopBooth`).
 - **Backend layer** is pluggable: Supabase when keys exist, else an in-memory +
   BroadcastChannel demo store. `addRequest` / `setStatus` / `refetch` wrap both.
 - **Gig tagging:** the booth's QR bakes the current gig name into the guest link
@@ -72,7 +80,8 @@ All config is a single `CONFIG` object at the top of `request-portal.html`:
 - Preserve the single-file, no-build, self-contained architecture.
 - Syntax-check the inline script after edits.
 - Don't add real secret keys to the repo — only the publishable key belongs
-  client-side. The booth PIN is not a security boundary.
+  client-side. Access control lives in RLS (`supabase/booth-auth.sql`), not in
+  the page; keep it that way.
 
 ## Ideas not yet built
 
