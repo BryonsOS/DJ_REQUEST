@@ -47,8 +47,8 @@ No framework, no build step. Everything is in `request-portal.html`.
 2. **Add your keys** to the `CONFIG` block at the top of `request-portal.html`
    (project URL + publishable key, and optionally the booth email).
 
-3. **Deploy** — drag `request-portal.html` onto https://app.netlify.com/drop.
-   HTTPS is required. That's it.
+3. **Deploy** — link the repo in Netlify; every push deploys. `netlify.toml`
+   serves the app at the site root. HTTPS is required. That's it.
 
 Leave the keys blank to run in local **demo mode** (same-browser only) while testing.
 

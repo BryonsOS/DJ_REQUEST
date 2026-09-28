@@ -12,8 +12,9 @@ Built and maintained by Bryon (Pro DJ Services / Directmix / YourWeddingsDJ).
 - **One file, no build step.** Everything — HTML, CSS, vanilla JS — lives in
   `request-portal.html`. No framework, no bundler, no npm. Keep it that way.
 - **Backend:** Supabase (Postgres + Realtime).
-- **Deploy:** drag `request-portal.html` onto https://app.netlify.com/drop, or
-  connect the Netlify MCP. No CI. HTTPS is required (wake lock + PWA features).
+- **Deploy:** Netlify is linked to this GitHub repo and auto-deploys on push
+  (no build step; `netlify.toml` rewrites `/` to `request-portal.html` and hides
+  the repo docs/SQL). HTTPS is required (wake lock + PWA features).
 - **External libs** load from CDN only: `qrcode-generator` from cdnjs;
   `@supabase/supabase-js` is injected dynamically at runtime, only when keys are
   present. Don't vendor or bundle them.
@@ -46,7 +47,7 @@ All config is a single `CONFIG` object at the top of `request-portal.html`:
 ## Live deploy
 
 - https://verdant-medovik-096c8b.netlify.app/  (guest form)
-- https://verdant-medovik-096c8b.netlify.app/#booth  (booth, PIN-gated)
+- https://verdant-medovik-096c8b.netlify.app/#booth  (booth, Supabase Auth sign-in)
 
 ## App structure (all inside request-portal.html)
 
