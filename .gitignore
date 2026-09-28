@@ -1,0 +1,26 @@
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Secrets / local env (keys live in CONFIG; never commit a real .env)
+.env
+.env.*
+!.env.example
+
+# Node (only if you ever add tooling)
+node_modules/
+npm-debug.log*
+
+# Claude Code local settings (personal, not shared)
+.claude/settings.local.json
+
+# Local library exports / scratch data
+*.local.csv
+scratch/

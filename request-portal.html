@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Request Portal</title>
+<meta name="theme-color" content="#120E22">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Requests">
+
+<!--
+=====================================================================
+  GUEST REQUEST PORTAL  —  single-file, deploy anywhere (Netlify / Hostinger drag-drop)
+=====================================================================
+  TWO VIEWS in one file:
+    • Guest form        →  yoursite.com/            (this is the QR target)
+    • Booth dashboard   →  yoursite.com/#booth      (PIN-gated)
+
+  HOW TO GO LIVE (3 steps):
+    1. Make a Supabase table (run this SQL in the SQL editor):
+
+         create table requests (
+           id          uuid primary key default gen_random_uuid(),
+           created_at  timestamptz default now(),
+           song        text not null,
+           artist      text,
+           guest       text,
+           note        text,
+           status      text default 'new',     -- new | played | declined
+           gig         text
+         );
+         alter table requests enable row level security;
+         create policy "anyone can read"   on requests for select using (true);
+         create policy "anyone can insert" on requests for insert with check (true);
+         create policy "anyone can update" on requests for update using (true);
+
+         -- enable realtime so the iPad updates live:
+         alter publication supabase_realtime add table requests;
+
+    2. Paste your project URL + anon key into CONFIG below.
+    3. Set your own BOOTH_PIN. Deploy. Done.
+
+  No keys filled in?  It runs in LOCAL DEMO MODE so you can try the
+  whole flow first. Demo mode only syncs tabs on the same browser —
+  real multi-phone use needs Supabase (step 1–2 above).
+=====================================================================
+-->
+
+<script>
+  const CONFIG = {
+    SUPABASE_URL:      "https://mhktyejanikvdnjbndgi.supabase.co",
+    SUPABASE_ANON_KEY: "sb_publishable_ghD1UY99uWhrEyGqIzoRXA_wn3-_9kh",  // publishable key — safe in client code
+    BOOTH_PIN:         "6000",          // change this if you like
+    GIG_NAME:          "Tonight's Set"
+  };
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;900&family=Inter:wght@400;500;600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --booth:#120E22;          /* booth dark, purple-tinted (not pure black) */
+    --booth-2:#0C0918;        /* deeper */
+    --card:#1C1733;           /* lifted surface */
+    --card-2:#252041;
+    --line:#332B52;
+    --ink:#F3EFFB;            /* near-white */
+    --mute:#9B92B8;           /* lavender-grey */
+    --mute-2:#6F6790;
+    --mag:#FF3D7F;            /* hot magenta — energy / now */
+    --mag-soft:rgba(255,61,127,.14);
+    --cyan:#2DE2E6;           /* electric cyan — verified in library */
+    --cyan-soft:rgba(45,226,230,.13);
+    --amber:#FFB13D;          /* new / pending */
+    --amber-soft:rgba(255,177,61,.14);
+    --display:"Archivo","Arial Narrow",system-ui,sans-serif;
+    --body:"Inter",system-ui,-apple-system,sans-serif;
+    --mono:"Space Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --radius:16px;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(900px 500px at 12% -8%, rgba(255,61,127,.10), transparent 60%),
+      radial-gradient(900px 600px at 100% 0%, rgba(45,226,230,.08), transparent 55%),
+      var(--booth);
+    color:var(--ink);
+    font-family:var(--body);
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+    line-height:1.5;
+  }
+  a{color:inherit;}
+  button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit;}
+  input,textarea{font-family:inherit;}
+  ::selection{background:var(--mag);color:#fff;}
+
+  .wrap{max-width:540px;margin:0 auto;padding:22px 18px 60px;}
+  .wrap--wide{max-width:920px;}
+
+  /* ---------- shared header ---------- */
+  .brandbar{display:flex;align-items:center;gap:11px;padding:6px 2px 22px;}
+  .logo{
+    width:38px;height:38px;border-radius:11px;flex:none;
+    background:linear-gradient(135deg,var(--mag),#B5179E 60%,var(--cyan));
+    display:grid;place-items:center;
+    box-shadow:0 6px 22px rgba(255,61,127,.35);
+  }
+  .logo svg{width:20px;height:20px;display:block;}
+  .brandbar .name{font-family:var(--display);font-weight:900;letter-spacing:.06em;text-transform:uppercase;font-size:1.02rem;}
+  .brandbar .sub{font-size:.72rem;color:var(--mute);letter-spacing:.16em;text-transform:uppercase;margin-top:-2px;}
+
+  /* =================  GUEST FORM  ================= */
+  .marquee{
+    font-family:var(--display);font-weight:900;font-size:clamp(2.5rem,11vw,3.8rem);
+    line-height:.92;letter-spacing:.01em;text-transform:uppercase;margin:8px 0 6px;
+  }
+  .marquee em{font-style:normal;color:var(--mag);text-shadow:0 0 28px rgba(255,61,127,.45);}
+  .lede{color:var(--mute);font-size:1rem;margin:0 0 26px;max-width:34ch;}
+
+  .field{margin-bottom:16px;}
+  .field label{display:block;font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);margin-bottom:7px;font-weight:600;}
+  .field label .opt{color:var(--mute-2);letter-spacing:.04em;text-transform:none;font-weight:400;}
+  .ctrl{
+    width:100%;background:var(--card);border:1.5px solid var(--line);border-radius:13px;
+    color:var(--ink);font-size:1.06rem;padding:15px 16px;transition:border-color .15s,box-shadow .15s,background .15s;
+  }
+  textarea.ctrl{resize:vertical;min-height:74px;}
+  .ctrl::placeholder{color:var(--mute-2);}
+  .ctrl:focus{outline:none;border-color:var(--mag);box-shadow:0 0 0 4px var(--mag-soft);background:var(--card-2);}
+
+  .submit{
+    width:100%;margin-top:10px;background:linear-gradient(135deg,var(--mag),#D81E5B);
+    color:#fff;font-family:var(--display);font-weight:900;letter-spacing:.08em;text-transform:uppercase;
+    font-size:1.15rem;padding:17px;border-radius:14px;box-shadow:0 10px 30px rgba(255,61,127,.35);
+    transition:transform .12s,box-shadow .12s,filter .12s;
+  }
+  .submit:hover{filter:brightness(1.06);}
+  .submit:active{transform:translateY(2px);box-shadow:0 4px 14px rgba(255,61,127,.3);}
+  .submit:disabled{opacity:.55;cursor:default;box-shadow:none;}
+
+  .finehint{text-align:center;color:var(--mute-2);font-size:.82rem;margin-top:16px;}
+
+  /* confirmation */
+  .thanks{text-align:center;padding:40px 10px;animation:rise .4s ease both;}
+  .thanks .check{
+    width:78px;height:78px;border-radius:50%;margin:0 auto 22px;display:grid;place-items:center;
+    background:var(--mag-soft);border:2px solid var(--mag);
+  }
+  .thanks .check svg{width:36px;height:36px;}
+  .thanks h2{font-family:var(--display);font-weight:900;text-transform:uppercase;letter-spacing:.04em;font-size:1.9rem;margin:0 0 8px;}
+  .thanks p{color:var(--mute);margin:0 0 26px;}
+  .ghost{
+    border:1.5px solid var(--line);border-radius:13px;padding:14px 22px;font-weight:600;
+    letter-spacing:.04em;transition:border-color .15s,background .15s;
+  }
+  .ghost:hover{border-color:var(--mag);background:var(--mag-soft);}
+
+  @keyframes rise{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+
+  /* =================  BOOTH DASHBOARD  ================= */
+  .booth-top{display:flex;flex-wrap:wrap;align-items:center;gap:14px 18px;padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:18px;}
+  .gigname{
+    background:transparent;border:none;color:var(--ink);font-family:var(--display);font-weight:900;
+    text-transform:uppercase;letter-spacing:.04em;font-size:1.6rem;padding:2px 4px;border-radius:8px;min-width:120px;
+    border-bottom:2px dashed transparent;
+  }
+  .gigname:hover{border-bottom-color:var(--line);}
+  .gigname:focus{outline:none;border-bottom-color:var(--mag);}
+  .booth-top .spacer{flex:1;}
+  .tinybtn{
+    border:1.5px solid var(--line);border-radius:10px;padding:9px 13px;font-size:.82rem;font-weight:600;
+    display:inline-flex;align-items:center;gap:7px;transition:border-color .15s,background .15s,color .15s;white-space:nowrap;
+  }
+  .tinybtn:hover{border-color:var(--cyan);background:var(--cyan-soft);}
+  .tinybtn svg{width:15px;height:15px;}
+
+  .tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;}
+  .tab{
+    border:1.5px solid var(--line);border-radius:999px;padding:8px 16px;font-size:.82rem;font-weight:600;
+    letter-spacing:.03em;color:var(--mute);transition:all .15s;display:inline-flex;align-items:center;gap:8px;
+  }
+  .tab .cnt{font-family:var(--mono);font-size:.72rem;background:var(--card-2);padding:1px 7px;border-radius:999px;color:var(--ink);}
+  .tab[aria-selected="true"]{color:var(--ink);border-color:var(--mag);background:var(--mag-soft);}
+  .tab[aria-selected="true"] .cnt{background:var(--mag);color:#fff;}
+
+  .queue{display:flex;flex-direction:column;gap:13px;}
+
+  /* request slip card */
+  .slip{
+    position:relative;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:16px 17px;display:flex;gap:14px;align-items:flex-start;animation:rise .3s ease both;
+    border-left:4px solid var(--amber);
+  }
+  .slip[data-status="played"]{border-left-color:var(--cyan);opacity:.82;}
+  .slip[data-status="declined"]{border-left-color:var(--mute-2);opacity:.6;}
+  .slip[data-status="played"] .song{text-decoration:line-through;text-decoration-color:var(--mute-2);}
+
+  .slip .body{flex:1;min-width:0;}
+  .song{font-family:var(--display);font-weight:700;font-size:1.22rem;line-height:1.15;word-break:break-word;}
+  .artist{color:var(--mute);font-size:.95rem;margin-top:1px;word-break:break-word;}
+  .meta{display:flex;flex-wrap:wrap;gap:7px 9px;margin-top:11px;align-items:center;}
+
+  .badge{font-family:var(--mono);font-size:.7rem;letter-spacing:.02em;padding:3px 9px;border-radius:7px;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;}
+  .badge svg{width:11px;height:11px;}
+  .b-in{background:var(--cyan-soft);color:var(--cyan);border:1px solid rgba(45,226,230,.3);}
+  .b-out{background:rgba(255,255,255,.04);color:var(--mute-2);border:1px solid var(--line);}
+  .b-data{background:var(--card-2);color:var(--mute);border:1px solid var(--line);}
+  .b-time{color:var(--mute-2);font-family:var(--mono);font-size:.7rem;}
+
+  .who{margin-top:9px;font-size:.9rem;color:var(--mute);}
+  .who strong{color:var(--ink);font-weight:600;}
+  .who .note{display:block;color:var(--ink);margin-top:3px;font-style:italic;}
+
+  /* demand meter (signature) */
+  .demand{
+    flex:none;width:54px;text-align:center;border-left:1px dashed var(--line);padding-left:13px;align-self:stretch;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
+  }
+  .demand .num{font-family:var(--display);font-weight:900;font-size:1.6rem;line-height:1;color:var(--mag);text-shadow:0 0 16px rgba(255,61,127,.5);}
+  .demand .bars{display:flex;gap:2px;align-items:flex-end;height:18px;}
+  .demand .bars i{width:4px;background:var(--mag);border-radius:1px;display:block;box-shadow:0 0 8px rgba(255,61,127,.5);}
+  .demand .lbl{font-family:var(--mono);font-size:.56rem;letter-spacing:.1em;text-transform:uppercase;color:var(--mute-2);}
+
+  .acts{display:flex;flex-direction:column;gap:7px;flex:none;}
+  .act{width:40px;height:40px;border-radius:11px;border:1.5px solid var(--line);display:grid;place-items:center;transition:all .14s;}
+  .act svg{width:18px;height:18px;}
+  .act.play:hover{border-color:var(--cyan);background:var(--cyan-soft);color:var(--cyan);}
+  .act.decline:hover{border-color:var(--mag);background:var(--mag-soft);color:var(--mag);}
+  .act.undo:hover{border-color:var(--amber);background:var(--amber-soft);color:var(--amber);}
+
+  .empty{text-align:center;color:var(--mute-2);padding:54px 20px;border:1.5px dashed var(--line);border-radius:var(--radius);}
+  .empty .big{font-family:var(--display);font-weight:900;text-transform:uppercase;letter-spacing:.04em;font-size:1.3rem;color:var(--mute);margin-bottom:6px;}
+
+  /* ---------- top requests view ---------- */
+  .topbar2{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px;}
+  .topnote{font-size:.82rem;color:var(--mute);max-width:46ch;}
+  .topbtns{display:flex;gap:8px;flex-wrap:wrap;}
+  .rank{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:13px 16px;margin-bottom:10px;}
+  .rank.shop{border-color:rgba(255,61,127,.4);background:linear-gradient(90deg,var(--mag-soft),transparent 60%);}
+  .rank .rk{font-family:var(--mono);font-size:1rem;color:var(--mute-2);width:26px;text-align:right;flex:none;}
+  .rank .rkbody{flex:1;min-width:0;}
+  .rank .rkcount{flex:none;text-align:center;min-width:48px;}
+  .rank .rkcount .num{font-family:var(--display);font-weight:900;font-size:1.7rem;line-height:1;color:var(--cyan);}
+  .rank.shop .rkcount .num{color:var(--mag);}
+  .rank .rkcount .lbl{font-family:var(--mono);font-size:.58rem;letter-spacing:.1em;text-transform:uppercase;color:var(--mute-2);}
+  .b-shop{background:var(--mag-soft);color:var(--mag);border:1px solid rgba(255,61,127,.35);}
+  .b-grab{background:var(--mag);color:#fff;border:1px solid var(--mag);text-decoration:none;font-weight:700;font-family:var(--body);letter-spacing:.01em;transition:filter .12s;}
+  .b-grab:hover{filter:brightness(1.12);}
+  .b-grab svg{width:12px;height:12px;}
+
+  /* ---------- alerts ---------- */
+  .tinybtn.on{border-color:var(--mag);background:var(--mag-soft);color:var(--mag);}
+  .slip[data-fresh]{animation:rise .3s ease both, freshpulse 1.7s ease .05s;}
+  @keyframes freshpulse{
+    0%{box-shadow:0 0 0 0 rgba(255,61,127,.55);}
+    70%{box-shadow:0 0 0 13px rgba(255,61,127,0);}
+    100%{box-shadow:0 0 0 0 rgba(255,61,127,0);}
+  }
+  /* screen-awake indicator (iPad shelf) */
+  .wakedot{width:32px;height:32px;border-radius:9px;border:1.5px solid var(--line);display:grid;place-items:center;color:var(--mute-2);flex:none;}
+  .wakedot svg{width:15px;height:15px;}
+  .wakedot.on{border-color:var(--cyan);background:var(--cyan-soft);color:var(--cyan);}
+  /* glance-from-across-the-booth: New tab glows while requests are waiting and you're looking elsewhere */
+  @keyframes tabwait{0%,100%{box-shadow:0 0 0 0 rgba(255,177,61,0);}50%{box-shadow:0 0 0 5px rgba(255,177,61,.28);}}
+  .tab[data-filter="new"][aria-selected="false"].waiting{border-color:var(--amber);color:var(--ink);animation:tabwait 1.9s ease-in-out infinite;}
+  .tab[data-filter="new"][aria-selected="false"].waiting .cnt{background:var(--amber);color:#1a1300;}
+
+  /* ---------- modal ---------- */
+  .scrim{position:fixed;inset:0;background:rgba(8,6,16,.78);backdrop-filter:blur(5px);display:grid;place-items:center;padding:20px;z-index:50;animation:fade .2s ease both;}
+  @keyframes fade{from{opacity:0;}to{opacity:1;}}
+  .modal{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:26px 24px;max-width:430px;width:100%;animation:rise .25s ease both;}
+  .modal h3{font-family:var(--display);font-weight:900;text-transform:uppercase;letter-spacing:.03em;margin:0 0 4px;font-size:1.35rem;}
+  .modal p{color:var(--mute);font-size:.92rem;margin:0 0 18px;}
+  .modal .close{position:absolute;}
+  .qrbox{background:#fff;border-radius:14px;padding:16px;display:grid;place-items:center;margin:4px 0 16px;min-height:200px;}
+  .qrbox canvas,.qrbox img{display:block;max-width:100%;height:auto;}
+  .linkrow{display:flex;gap:8px;}
+  .linkrow input{flex:1;background:var(--booth-2);border:1.5px solid var(--line);border-radius:11px;color:var(--ink);padding:12px;font-size:.85rem;font-family:var(--mono);}
+  .pinpad input{width:100%;text-align:center;letter-spacing:.5em;font-family:var(--mono);font-size:1.6rem;background:var(--booth-2);border:1.5px solid var(--line);border-radius:13px;color:var(--ink);padding:15px;}
+  .pinpad input:focus{outline:none;border-color:var(--mag);box-shadow:0 0 0 4px var(--mag-soft);}
+  .modal .err{color:var(--mag);font-size:.84rem;min-height:1.2em;margin-top:8px;font-weight:600;}
+  .modal .row{display:flex;gap:10px;margin-top:18px;}
+  .modal .row .submit{margin-top:0;}
+
+  .lib-status{font-size:.84rem;color:var(--mute);display:flex;align-items:center;gap:8px;}
+  .lib-status .dot{width:8px;height:8px;border-radius:50%;background:var(--mute-2);flex:none;}
+  .lib-status.on .dot{background:var(--cyan);box-shadow:0 0 10px var(--cyan);}
+
+  /* demo banner + view switch */
+  .demobar{
+    background:var(--amber-soft);border:1px solid rgba(255,177,61,.3);border-radius:12px;
+    padding:10px 14px;font-size:.82rem;color:var(--amber);margin-bottom:18px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;
+  }
+  .demobar strong{color:var(--ink);}
+  .demobar .switch{margin-left:auto;display:flex;gap:6px;}
+  .demobar .switch button{border:1.5px solid rgba(255,177,61,.4);border-radius:9px;padding:6px 12px;font-size:.78rem;font-weight:600;color:var(--amber);}
+  .demobar .switch button:hover{background:rgba(255,177,61,.16);}
+
+  .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:var(--card-2);border:1px solid var(--line);color:var(--ink);padding:13px 20px;border-radius:12px;font-size:.9rem;font-weight:600;opacity:0;pointer-events:none;transition:all .25s;z-index:60;box-shadow:0 12px 40px rgba(0,0,0,.5);}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+  .hidden{display:none !important;}
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none !important;transition:none !important;}
+  }
+  @media (max-width:480px){
+    .slip{padding:14px;}
+    .demand{display:none;}  /* keep mobile booth tight; count shown as badge instead */
+  }
+</style>
+</head>
+<body>
+
+<!-- ===================== GUEST VIEW ===================== -->
+<main id="guestView" class="wrap">
+  <div class="brandbar">
+    <div class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M9 18V5l11-2v13" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="6" cy="18" r="3" stroke="#fff" stroke-width="2"/><circle cx="17" cy="16" r="3" stroke="#fff" stroke-width="2"/></svg>
+    </div>
+    <div>
+      <div class="name" id="guestGig">Tonight's Set</div>
+      <div class="sub">Request a track</div>
+    </div>
+  </div>
+
+  <div id="formStage">
+    <h1 class="marquee">What do you<br>want to <em>hear?</em></h1>
+    <p class="lede">Drop your request and the DJ sees it live at the booth. No promises, but the dance floor decides.</p>
+
+    <div class="field">
+      <label for="song">Song</label>
+      <input class="ctrl" id="song" type="text" placeholder="e.g. Mr. Brightside" autocomplete="off" maxlength="120">
+    </div>
+    <div class="field">
+      <label for="artist">Artist <span class="opt">— optional, helps a lot</span></label>
+      <input class="ctrl" id="artist" type="text" placeholder="e.g. The Killers" autocomplete="off" maxlength="120">
+    </div>
+    <div class="field">
+      <label for="guest">Your name <span class="opt">— optional</span></label>
+      <input class="ctrl" id="guest" type="text" placeholder="So the DJ can shout you out" autocomplete="off" maxlength="60">
+    </div>
+    <div class="field">
+      <label for="note">Note <span class="opt">— optional</span></label>
+      <textarea class="ctrl" id="note" placeholder="Birthday? First dance? Tell the booth." maxlength="160"></textarea>
+    </div>
+
+    <button class="submit" id="sendBtn">Send to the booth</button>
+    <p class="finehint" id="formHint">Keep 'em coming — request as many as you like.</p>
+  </div>
+
+  <div id="thanksStage" class="thanks hidden">
+    <div class="check"><svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="#FF3D7F" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+    <h2>On the list</h2>
+    <p id="thanksLine">The booth's got it.</p>
+    <button class="ghost" id="againBtn">Request another</button>
+  </div>
+</main>
+
+<!-- ===================== BOOTH VIEW ===================== -->
+<main id="boothView" class="wrap wrap--wide hidden">
+  <div id="demoBar" class="demobar hidden">
+    <span><strong>Demo mode.</strong> No Supabase keys yet — syncing this browser only. Use the buttons to preview both sides.</span>
+    <span class="switch">
+      <button data-go="guest">Guest view</button>
+      <button data-go="booth">Booth view</button>
+    </span>
+  </div>
+
+  <div class="booth-top">
+    <input class="gigname" id="gigInput" value="Tonight's Set" maxlength="40" aria-label="Gig name">
+    <div class="spacer"></div>
+    <span class="wakedot" id="wakeDot" title="Screen sleep prevention"><svg viewBox="0 0 24 24" fill="none"><path d="M7 11V8a5 5 0 0110 0v3M5 11h14v9H5z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    <div class="lib-status" id="libStatus"><span class="dot"></span><span id="libText">No library loaded</span></div>
+    <button class="tinybtn" id="loadLibBtn"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Load library</button>
+    <button class="tinybtn" id="qrBtn"><svg viewBox="0 0 24 24" fill="none"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>QR code</button>
+    <button class="tinybtn" id="alertBtn" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="alertLabel">Alerts off</span></button>
+    <button class="tinybtn" id="testBtn" title="Play a test alert">Test</button>
+    <input type="file" id="libFile" accept=".csv,.txt" class="hidden">
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" data-filter="new"      aria-selected="true">New <span class="cnt" id="cnt-new">0</span></button>
+    <button class="tab" role="tab" data-filter="played"   aria-selected="false">Played <span class="cnt" id="cnt-played">0</span></button>
+    <button class="tab" role="tab" data-filter="declined" aria-selected="false">Declined <span class="cnt" id="cnt-declined">0</span></button>
+    <button class="tab" role="tab" data-filter="all"      aria-selected="false">All <span class="cnt" id="cnt-all">0</span></button>
+    <button class="tab" role="tab" data-filter="top"      aria-selected="false">Top requests</button>
+  </div>
+
+  <div class="queue" id="queue"></div>
+</main>
+
+<!-- ===================== MODALS ===================== -->
+<div id="pinModal" class="scrim hidden">
+  <div class="modal pinpad">
+    <h3>Booth access</h3>
+    <p>Enter the PIN to open the live queue.</p>
+    <input id="pinInput" type="password" inputmode="numeric" maxlength="8" placeholder="••••" aria-label="PIN">
+    <div class="err" id="pinErr"></div>
+    <div class="row"><button class="submit" id="pinGo">Open booth</button></div>
+  </div>
+</div>
+
+<div id="qrModal" class="scrim hidden">
+  <div class="modal">
+    <h3>Guest request link</h3>
+    <p>Show this QR on a screen or print it for the tables. Scanning opens the request form.</p>
+    <div class="qrbox" id="qrBox"></div>
+    <div class="linkrow">
+      <input id="qrLink" type="text" readonly>
+      <button class="tinybtn" id="copyLink"><svg viewBox="0 0 24 24" fill="none"><path d="M9 9h10v10H9zM5 15V5h10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Copy</button>
+    </div>
+    <div class="row"><button class="ghost" id="qrClose" style="flex:1">Close</button></div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  const LIVE = !!(CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY);
+  const GIG_PARAM = new URLSearchParams(location.search).get("gig");
+  const $ = (s,el=document)=>el.querySelector(s);
+  const $$ = (s,el=document)=>Array.from(el.querySelectorAll(s));
+
+  /* ---------------- tiny store with pluggable backend ---------------- */
+  let requests = [];                 // local cache, all views render from here
+  let library = [];                  // parsed track objects
+  let libIndex = null;               // normalized lookup
+  const listeners = new Set();
+  const notify = ()=>listeners.forEach(fn=>fn());
+
+  // demo-mode cross-tab sync
+  let bc = null;
+  try { bc = new BroadcastChannel("request-portal-demo"); } catch(e){}
+
+  let sb = null;
+  function loadSupabase(){
+    return new Promise((res,rej)=>{
+      const s=document.createElement("script");
+      s.src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2";
+      s.onload=res; s.onerror=rej; document.head.appendChild(s);
+    });
+  }
+
+  async function initBackend(){
+    if(LIVE){
+      try{
+        await loadSupabase();
+        sb = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+        const {data} = await sb.from("requests").select("*").order("created_at",{ascending:false});
+        requests = data || [];
+        sb.channel("requests-live")
+          .on("postgres_changes",{event:"*",schema:"public",table:"requests"},payload=>{
+            applyChange(payload); notify();
+          }).subscribe();
+        notify();
+      }catch(err){ console.error("Supabase init failed, falling back to demo:",err); startDemo(); }
+    } else {
+      startDemo();
+    }
+  }
+
+  function applyChange(p){
+    if(p.eventType==="INSERT"){ if(!requests.find(r=>r.id===p.new.id)){ requests.unshift(p.new); onIncoming(p.new); } }
+    else if(p.eventType==="UPDATE"){ const i=requests.findIndex(r=>r.id===p.new.id); if(i>-1) requests[i]=p.new; }
+    else if(p.eventType==="DELETE"){ requests = requests.filter(r=>r.id!==p.old.id); }
+  }
+
+  function startDemo(){
+    // seed a few sample requests so the booth isn't empty on first look
+    if(requests.length===0){
+      const now=Date.now();
+      requests = [
+        mk("Mr. Brightside","The Killers","Maddie","It's my birthday!!", "new", now-60000),
+        mk("Don't Stop Believin'","Journey","","", "new", now-200000),
+        mk("Mr. Brightside","The Killers","Jake","", "new", now-240000),
+        mk("September","Earth, Wind & Fire","Aunt Carol","for the dance floor", "played", now-900000),
+        mk("Free Bird","Lynyrd Skynyrd","Some guy","all 9 minutes", "declined", now-1200000),
+      ];
+    }
+    if(bc){
+      bc.onmessage = (e)=>{
+        if(e.data && e.data.type==="insert"){ requests.unshift(e.data.row); onIncoming(e.data.row); notify(); }
+        if(e.data && e.data.type==="update"){ const i=requests.findIndex(r=>r.id===e.data.row.id); if(i>-1){requests[i]=e.data.row; notify();} }
+      };
+    }
+    notify();
+  }
+
+  function mk(song,artist,guest,note,status,t){
+    return { id:"d"+Math.random().toString(36).slice(2), song, artist, guest, note, status,
+             created_at:new Date(t||Date.now()).toISOString(), gig:CONFIG.GIG_NAME };
+  }
+
+  async function addRequest(row){
+    if(LIVE && sb){
+      const {error} = await sb.from("requests").insert([row]);
+      if(error){ console.error(error); return false; }
+      return true;
+    } else {
+      const full = Object.assign(mk(row.song,row.artist,row.guest,row.note,"new"), row);
+      requests.unshift(full);
+      if(bc) bc.postMessage({type:"insert",row:full});
+      notify(); return true;
+    }
+  }
+
+  async function setStatus(id,status){
+    const r = requests.find(x=>x.id===id); if(!r) return;
+    r.status = status;
+    if(LIVE && sb){ await sb.from("requests").update({status}).eq("id",id); }
+    else { if(bc) bc.postMessage({type:"update",row:r}); }
+    notify();
+  }
+
+  /* ---------------- library cross-check ---------------- */
+  const COLS = {
+    title:["title","name","track","song","tracktitle","track title","trackname"],
+    artist:["artist","artists","artist name","artistname","albumartist"],
+    bpm:["bpm","tempo"],
+    key:["key","musical key","initialkey","initial key"],
+    energy:["energy"],
+    era:["era","year","date"],
+    genre:["subgenre","genre","grouping"]
+  };
+  const norm = s => (s||"").toLowerCase()
+      .replace(/\([^)]*\)|\[[^\]]*\]/g," ")          // drop (...) [...]
+      .replace(/\b(feat|ft|featuring|with)\b.*$/," ") // drop feat...
+      .replace(/['’`]/g,"")                           // don't -> dont
+      .replace(/&/g," and ")
+      .replace(/[^a-z0-9 ]/g," ")
+      .replace(/\s+/g," ").trim();
+
+  // words that don't identify a song: filler + version/edit tags. Lets "Yeah" match "Yeah (Extended Mix)".
+  const STOP=new Set(["the","a","an","and","of","to","in","on","for","by","vs","x","with","feat","ft","featuring"]);
+  const VERSION=new Set(["extended","mix","remix","edit","radio","club","original","rework","version","clean","dirty","explicit","intro","outro","acapella","acappella","instrumental","inst","vip","bootleg","remaster","remastered","live","dub","mashup","short","long","cut","redrum","hype","transition","segue","reedit","flip","starter","quick","snippet","snip","mstr"]);
+  const toks = s => norm(s).split(" ").filter(w=>w && !STOP.has(w) && !VERSION.has(w));
+
+  function tidalURL(song,artist){
+    const q=((song||"")+" "+(artist||"")).trim();
+    return "https://listen.tidal.com/search?q="+encodeURIComponent(q);
+  }
+
+  function parseCSV(text){
+    // robust-enough CSV: handles quoted fields & commas
+    const rows=[]; let row=[],cur="",q=false;
+    for(let i=0;i<text.length;i++){
+      const c=text[i];
+      if(q){ if(c==='"'){ if(text[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=c; }
+      else { if(c==='"')q=true; else if(c===","){row.push(cur);cur="";} 
+             else if(c==="\n"){row.push(cur);rows.push(row);row=[];cur="";}
+             else if(c==="\r"){} else cur+=c; }
+    }
+    if(cur.length||row.length){ row.push(cur); rows.push(row); }
+    return rows.filter(r=>r.length>1 || (r.length===1 && r[0].trim()!==""));
+  }
+
+  function findCol(headers,names){
+    for(let i=0;i<headers.length;i++){ if(names.includes(headers[i].toLowerCase().trim())) return i; }
+    return -1;
+  }
+
+  function ingestLibrary(text){
+    const rows = parseCSV(text);
+    if(rows.length<2){ toast("Couldn't read that file."); return; }
+    const headers = rows[0];
+    const ti=findCol(headers,COLS.title), ai=findCol(headers,COLS.artist);
+    if(ti<0){ toast("No 'Title' column found in that CSV."); return; }
+    const bi=findCol(headers,COLS.bpm), ki=findCol(headers,COLS.key),
+          ei=findCol(headers,COLS.energy), eri=findCol(headers,COLS.era), gi=findCol(headers,COLS.genre);
+    library = rows.slice(1).map(r=>({
+      title:(r[ti]||"").trim(), artist:ai>=0?(r[ai]||"").trim():"",
+      bpm:bi>=0?(r[bi]||"").trim():"", key:ki>=0?(r[ki]||"").trim():"",
+      energy:ei>=0?(r[ei]||"").trim():"", era:eri>=0?(r[eri]||"").trim():"",
+      genre:gi>=0?(r[gi]||"").trim():""
+    })).filter(t=>t.title);
+    indexLibrary();
+    try{ localStorage.setItem("rp_library", JSON.stringify(library)); }catch(e){}
+    updateLibStatus();
+    toast(library.length.toLocaleString()+" tracks loaded");
+    notify();
+  }
+
+  function indexLibrary(){
+    library.forEach(t=>{
+      t._tt = toks(t.title);
+      t._at = toks(t.artist);
+      t._all = new Set([...t._tt, ...t._at]);
+    });
+    libIndex = library.length ? true : null;
+    matchCache.clear();
+  }
+
+  function restoreLibrary(){
+    try{
+      const raw=localStorage.getItem("rp_library");
+      if(raw){ library=JSON.parse(raw); indexLibrary(); }
+    }catch(e){}
+    updateLibStatus();
+  }
+
+  const matchCache = new Map();
+  // Token-overlap match: a request hits a track when the track's TITLE words are (almost) all
+  // present in what the guest typed — so "Yeah" or "Usher Yeah" both match "Yeah (Extended Mix)".
+  function matchTrack(song,artist){
+    if(!libIndex) return null;
+    const key=(song||"")+"|"+(artist||"");
+    if(matchCache.has(key)) return matchCache.get(key);
+    const req=toks((song||"")+" "+(artist||""));
+    let best=null, bestScore=0;
+    if(req.length){
+      const reqSet=new Set(req);
+      for(const t of library){
+        if(!t._tt || !t._tt.length) continue;
+        let titleHit=0; for(const w of t._tt){ if(reqSet.has(w)) titleHit++; }
+        const titleCov = titleHit / t._tt.length;
+        if(titleCov < 0.8) continue;                 // the song title must basically appear in the request
+        let inter=0; reqSet.forEach(w=>{ if(t._all.has(w)) inter++; });
+        const score = titleCov + (inter / reqSet.size);
+        if(score > bestScore){ bestScore=score; best=t; }
+      }
+    }
+    matchCache.set(key,best);
+    return best;
+  }
+
+  function updateLibStatus(){
+    const el=$("#libStatus"), t=$("#libText");
+    if(library.length){ el.classList.add("on"); t.textContent=library.length.toLocaleString()+" tracks ready"; }
+    else { el.classList.remove("on"); t.textContent="No library loaded"; }
+  }
+
+  /* ---------------- notifications ---------------- */
+  let alertsOn=false, audioCtx=null, freshId=null, freshT=null, unseen=0, baseTitle="";
+  try{ alertsOn = localStorage.getItem("rp_alerts")==="1"; }catch(e){}
+
+  function boothActive(){ return location.hash.replace("#","")==="booth" && sessionStorage.getItem("rp_booth_ok"); }
+
+  function unlockAudio(){
+    try{
+      audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+      if(audioCtx.state==="suspended") audioCtx.resume();
+    }catch(e){}
+  }
+  function chime(){
+    if(!audioCtx) return;
+    const t=audioCtx.currentTime;
+    [[880,0],[1318.5,0.12]].forEach(([f,delay])=>{   // two-note " taa-daa "
+      const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+      o.type="sine"; o.frequency.value=f; o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(0.0001,t+delay);
+      g.gain.exponentialRampToValueAtTime(0.4,t+delay+0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+delay+0.38);
+      o.start(t+delay); o.stop(t+delay+0.42);
+    });
+  }
+
+  function fireAlert(row){
+    if(!boothActive() || !alertsOn) return;
+    chime();
+    try{ navigator.vibrate && navigator.vibrate([60,40,60]); }catch(e){}
+    freshId = row.id;
+    clearTimeout(freshT);
+    freshT = setTimeout(()=>{ freshId=null; if(boothActive()) renderBooth(); }, 4200);
+    if(document.hidden){
+      unseen++;
+      document.title = `(${unseen}) New request • ${baseTitle}`;
+      try{
+        if("Notification" in window && Notification.permission==="granted"){
+          const body=(row.song||"")+(row.artist?" — "+row.artist:"")+(row.guest?"  ·  "+row.guest:"");
+          const n=new Notification("New request", {body, tag:"request-portal"});
+          n.onclick=()=>{ window.focus(); n.close(); };
+        }
+      }catch(e){}
+    }
+  }
+  function onIncoming(row){ fireAlert(row); }
+
+  /* ---------------- keep iPad awake + reconnect on wake ---------------- */
+  let wakeLock=null, wakeWarned=false;
+  function paintWake(on){ const d=$("#wakeDot"); if(d){ d.classList.toggle("on",!!on); d.title = on?"Screen stays awake":"Screen may sleep — set Auto-Lock to Never"; } }
+  async function acquireWake(){
+    if(!boothActive()) return;
+    if(!("wakeLock" in navigator)){ paintWake(false); if(!wakeWarned){ wakeWarned=true; toast("Set the iPad's Auto-Lock to Never for the gig"); } return; }
+    try{
+      wakeLock = await navigator.wakeLock.request("screen");
+      wakeLock.addEventListener("release",()=>{ wakeLock=null; paintWake(false); });
+      paintWake(true);
+    }catch(e){ paintWake(false); }
+  }
+  async function refetch(){
+    if(LIVE && sb){
+      try{ const {data}=await sb.from("requests").select("*").order("created_at",{ascending:false}); if(data){ requests=data; notify(); } }catch(e){}
+    }
+  }
+
+  /* ---------------- rendering: booth ---------------- */
+  let filter="new";
+
+  function demandMap(){
+    // count NEW requests sharing a normalized title (crowd consensus)
+    const m=new Map();
+    requests.filter(r=>r.status==="new").forEach(r=>{
+      const k=norm(r.song); m.set(k,(m.get(k)||0)+1);
+    });
+    return m;
+  }
+
+  function timeAgo(iso){
+    const s=Math.floor((Date.now()-new Date(iso).getTime())/1000);
+    if(s<60) return "just now";
+    if(s<3600) return Math.floor(s/60)+"m ago";
+    if(s<86400) return Math.floor(s/3600)+"h ago";
+    return Math.floor(s/86400)+"d ago";
+  }
+
+  function esc(s){return (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+  function renderBooth(){
+    const counts={new:0,played:0,declined:0,all:requests.length};
+    requests.forEach(r=>{counts[r.status]=(counts[r.status]||0)+1;});
+    $("#cnt-new").textContent=counts.new; $("#cnt-played").textContent=counts.played;
+    $("#cnt-declined").textContent=counts.declined; $("#cnt-all").textContent=counts.all;
+    $('.tab[data-filter="new"]').classList.toggle("waiting", counts.new>0);
+
+    const dm=demandMap();
+    const q=$("#queue");
+
+    if(filter==="top"){ renderTop(q); return; }
+
+    const list = filter==="all"?requests:requests.filter(r=>r.status===filter);
+
+    if(!list.length){
+      q.innerHTML=`<div class="empty"><div class="big">${filter==="new"?"Queue's clear":"Nothing here"}</div>${filter==="new"?"New requests land here the second guests hit send.":"Switch tabs to see other requests."}</div>`;
+      return;
+    }
+
+    q.innerHTML = list.map(r=>{
+      const m = matchTrack(r.song,r.artist);
+      const count = r.status==="new" ? (dm.get(norm(r.song))||1) : 1;
+      const bars = Math.min(5,count);
+      const demand = (r.status==="new" && count>1) ? `
+        <div class="demand" title="${count} guests asked for this">
+          <div class="num">${count}</div>
+          <div class="bars">${Array.from({length:bars}).map((_,i)=>`<i style="height:${5+i*3}px"></i>`).join("")}</div>
+          <div class="lbl">on it</div>
+        </div>` : "";
+
+      let libBadge;
+      if(!libIndex){ libBadge=""; }
+      else if(m){
+        const ver = (m.title && m.title.trim().toLowerCase()!==(r.song||"").trim().toLowerCase())
+          ? `<span class="badge b-data">have: ${esc(m.title)}</span>` : "";
+        const data=[m.bpm&&`${m.bpm} BPM`, m.energy&&`E${m.energy}`, m.era, m.key].filter(Boolean)
+          .map(d=>`<span class="badge b-data">${esc(d)}</span>`).join("");
+        libBadge=`<span class="badge b-in"><svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>In library</span>${ver}${data}`;
+      } else {
+        libBadge=`<a class="badge b-grab" href="${tidalURL(r.song,r.artist)}" target="_blank" rel="noopener">Grab on Tidal<svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H9M17 7v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>`;
+      }
+
+      const who = (r.guest||r.note) ? `<div class="who">${r.guest?`<strong>${esc(r.guest)}</strong>`:""}${r.note?`<span class="note">"${esc(r.note)}"</span>`:""}</div>` : "";
+
+      const acts = r.status==="new"
+        ? `<button class="act play" data-id="${r.id}" data-to="played" title="Mark played"><svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+           <button class="act decline" data-id="${r.id}" data-to="declined" title="Decline"><svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>`
+        : `<button class="act undo" data-id="${r.id}" data-to="new" title="Back to new"><svg viewBox="0 0 24 24" fill="none"><path d="M9 14l-4-4 4-4M5 10h9a5 5 0 010 10h-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+
+      return `<div class="slip" data-status="${r.status}"${r.id===freshId?' data-fresh="1"':''}>
+        ${demand}
+        <div class="body">
+          <div class="song">${esc(r.song)}</div>
+          ${r.artist?`<div class="artist">${esc(r.artist)}</div>`:""}
+          <div class="meta">${libBadge}<span class="b-time">${timeAgo(r.created_at)}</span></div>
+          ${who}
+        </div>
+        <div class="acts">${acts}</div>
+      </div>`;
+    }).join("");
+
+    $$(".act",q).forEach(b=>b.onclick=()=>setStatus(b.dataset.id,b.dataset.to));
+  }
+
+  /* ---------------- top requests + export ---------------- */
+  function aggregate(){
+    const m=new Map();
+    requests.forEach(r=>{
+      const k=norm(r.song); if(!k) return;
+      let a=m.get(k);
+      if(!a){ a={song:r.song, artist:r.artist||"", count:0, played:0, declined:0}; m.set(k,a); }
+      a.count++;
+      if(r.status==="played") a.played++;
+      if(r.status==="declined") a.declined++;
+      if(!a.artist && r.artist) a.artist=r.artist;
+    });
+    return Array.from(m.values()).sort((x,y)=>y.count-x.count || x.song.localeCompare(y.song));
+  }
+
+  function renderTop(q){
+    const agg=aggregate();
+    const head = `<div class="topbar2">
+      <div class="topnote">${libIndex?'"Need to get" = requested but not in your loaded library — your shopping list.':'Load your library to flag which requested songs you do not own yet.'}</div>
+      <div class="topbtns">
+        <button class="tinybtn" id="expTally"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Song tally CSV</button>
+        <button class="tinybtn" id="expLog"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Full log CSV</button>
+      </div></div>`;
+    if(!agg.length){ q.innerHTML=head+`<div class="empty"><div class="big">No data yet</div>Requests tally up here as they come in — across every gig.</div>`; $("#expTally").onclick=exportTally; $("#expLog").onclick=exportLog; return; }
+    q.innerHTML = head + agg.map((a,i)=>{
+      const m=matchTrack(a.song,a.artist);
+      const shop = libIndex && !m;
+      const lib = !libIndex ? "" : (m
+        ? `<span class="badge b-in"><svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>In library</span>`+(m.bpm?`<span class="badge b-data">${esc(m.bpm)} BPM</span>`:"")
+        : `<a class="badge b-grab" href="${tidalURL(a.song,a.artist)}" target="_blank" rel="noopener">Grab on Tidal<svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H9M17 7v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>`);
+      return `<div class="rank${shop?' shop':''}">
+        <div class="rk">${i+1}</div>
+        <div class="rkbody">
+          <div class="song">${esc(a.song)}</div>
+          ${a.artist?`<div class="artist">${esc(a.artist)}</div>`:""}
+          <div class="meta">${lib}${a.played?`<span class="badge b-data">played ${a.played}×</span>`:""}</div>
+        </div>
+        <div class="rkcount"><div class="num">${a.count}</div><div class="lbl">${a.count===1?'ask':'asks'}</div></div>
+      </div>`;
+    }).join("");
+    $("#expTally").onclick=exportTally; $("#expLog").onclick=exportLog;
+  }
+
+  function toCSV(headers, rows){
+    const esc=v=>{ v=(v==null?"":String(v)); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; };
+    return headers.join(",")+"\n"+rows.map(r=>r.map(esc).join(",")).join("\n");
+  }
+  function download(name, text){
+    const blob=new Blob(["\ufeff"+text],{type:"text/csv;charset=utf-8;"});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement("a"); a.href=url; a.download=name;
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },1000);
+  }
+  function exportLog(){
+    const rows=requests.map(r=>[r.created_at,r.song,r.artist,r.guest,r.note,r.status,r.gig]);
+    download("requests-"+new Date().toISOString().slice(0,10)+".csv",
+      toCSV(["created_at","song","artist","guest","note","status","gig"], rows));
+    toast("Full log exported ("+requests.length+" rows)");
+  }
+  function exportTally(){
+    const agg=aggregate();
+    const rows=agg.map(a=>{ const m=matchTrack(a.song,a.artist);
+      const inlib = !libIndex ? "" : (m?"yes":"no");
+      return [a.song,a.artist,a.count,a.played,a.declined,inlib,m?m.bpm:"",m?m.energy:""]; });
+    download("song-tally-"+new Date().toISOString().slice(0,10)+".csv",
+      toCSV(["song","artist","times_requested","played","declined","in_library","bpm","energy"], rows));
+    toast("Song tally exported ("+agg.length+" songs)");
+  }
+  function showView(){
+    const booth = location.hash.replace("#","")==="booth";
+    if(booth){
+      if(!sessionStorage.getItem("rp_booth_ok")){ openPin(); return; }
+      $("#guestView").classList.add("hidden");
+      $("#boothView").classList.remove("hidden");
+      if(!LIVE) $("#demoBar").classList.remove("hidden");
+      renderBooth();
+      acquireWake();
+    } else {
+      $("#boothView").classList.add("hidden");
+      $("#guestView").classList.remove("hidden");
+    }
+  }
+
+  /* ---------------- PIN gate ---------------- */
+  function openPin(){
+    $("#pinModal").classList.remove("hidden");
+    setTimeout(()=>$("#pinInput").focus(),50);
+  }
+  $("#pinGo").onclick=()=>{
+    if($("#pinInput").value===CONFIG.BOOTH_PIN){
+      sessionStorage.setItem("rp_booth_ok","1");
+      $("#pinModal").classList.add("hidden");
+      if(alertsOn) unlockAudio();
+      showView();
+    } else { $("#pinErr").textContent="Wrong PIN. Try again."; $("#pinInput").value=""; $("#pinInput").focus(); }
+  };
+  $("#pinInput").addEventListener("keydown",e=>{ if(e.key==="Enter") $("#pinGo").click(); });
+
+  /* ---------------- guest form ---------------- */
+  function submitRequest(){
+    const song=$("#song").value.trim();
+    if(!song){ $("#song").focus(); $("#song").style.borderColor="var(--mag)"; return; }
+    const row={ song, artist:$("#artist").value.trim(), guest:$("#guest").value.trim(),
+                note:$("#note").value.trim(), status:"new", gig: GIG_PARAM || $("#gigInput").value || CONFIG.GIG_NAME };
+    $("#sendBtn").disabled=true; $("#sendBtn").textContent="Sending…";
+    addRequest(row).then(ok=>{
+      $("#sendBtn").disabled=false; $("#sendBtn").textContent="Send to the booth";
+      if(ok){
+        $("#thanksLine").textContent = row.guest ? `Got it, ${row.guest}. The booth's on it.` : "The booth's got it.";
+        $("#formStage").classList.add("hidden"); $("#thanksStage").classList.remove("hidden");
+        ["song","artist","guest","note"].forEach(id=>$("#"+id).value="");
+      } else { toast("Couldn't send — check connection."); }
+    });
+  }
+  $("#sendBtn").onclick=submitRequest;
+  $("#song").addEventListener("keydown",e=>{ if(e.key==="Enter"){e.preventDefault(); $("#artist").focus();} });
+  $("#againBtn").onclick=()=>{ $("#thanksStage").classList.add("hidden"); $("#formStage").classList.remove("hidden"); $("#song").focus(); };
+
+  /* ---------------- booth controls ---------------- */
+  $$(".tab").forEach(t=>t.onclick=()=>{
+    filter=t.dataset.filter;
+    $$(".tab").forEach(x=>x.setAttribute("aria-selected", x===t?"true":"false"));
+    renderBooth();
+  });
+
+  $("#loadLibBtn").onclick=()=>$("#libFile").click();
+  $("#libFile").onchange=e=>{
+    const f=e.target.files[0]; if(!f) return;
+    const rd=new FileReader(); rd.onload=()=>ingestLibrary(rd.result); rd.readAsText(f);
+  };
+
+  const gigInput=$("#gigInput");
+  function applyGig(){
+    const v=gigInput.value||CONFIG.GIG_NAME;
+    $("#guestGig").textContent=v; document.title=v+" — Requests"; baseTitle=document.title;
+    try{ localStorage.setItem("rp_gig",v); }catch(e){}
+  }
+  gigInput.addEventListener("input",applyGig);
+
+  /* ---------------- QR ---------------- */
+  function guestURL(){
+    const g=(gigInput.value||"").trim();
+    return location.origin+location.pathname+(g?("?gig="+encodeURIComponent(g)):"");
+  }
+  function buildQR(){
+    const box=$("#qrBox"); box.innerHTML="";
+    const url=guestURL();
+    $("#qrLink").value=url;
+    if(typeof qrcode==="undefined"){ box.innerHTML='<span style="color:#333;font-size:.8rem">QR library blocked — copy the link below instead.</span>'; return; }
+    try{
+      const qr=qrcode(0,"M"); qr.addData(url); qr.make();
+      box.innerHTML=qr.createImgTag(6,12);
+    }catch(e){ box.innerHTML='<span style="color:#333;font-size:.8rem">Couldn\'t build QR — use the link.</span>'; }
+  }
+  $("#qrBtn").onclick=()=>{ buildQR(); $("#qrModal").classList.remove("hidden"); };
+  $("#qrClose").onclick=()=>$("#qrModal").classList.add("hidden");
+  $("#copyLink").onclick=()=>{ $("#qrLink").select(); navigator.clipboard&&navigator.clipboard.writeText($("#qrLink").value); toast("Link copied"); };
+
+  /* ---------------- alert controls ---------------- */
+  function paintAlertBtn(){
+    const b=$("#alertBtn");
+    b.classList.toggle("on",alertsOn);
+    b.setAttribute("aria-pressed",alertsOn?"true":"false");
+    $("#alertLabel").textContent = alertsOn?"Alerts on":"Alerts off";
+  }
+  $("#alertBtn").onclick=()=>{
+    alertsOn=!alertsOn;
+    try{ localStorage.setItem("rp_alerts",alertsOn?"1":"0"); }catch(e){}
+    if(alertsOn){
+      unlockAudio(); chime();
+      if("Notification" in window && Notification.permission==="default"){ Notification.requestPermission(); }
+      toast("Alerts on — chime + pulse on every new request");
+    } else { toast("Alerts off"); }
+    paintAlertBtn();
+  };
+  $("#testBtn").onclick=()=>{
+    unlockAudio();
+    if(!alertsOn){ alertsOn=true; try{localStorage.setItem("rp_alerts","1");}catch(e){} paintAlertBtn(); }
+    fireAlert({id:"__test__",song:"Test request",artist:"",guest:""});
+    toast("That's the alert");
+  };
+  document.addEventListener("visibilitychange",()=>{
+    if(!document.hidden){
+      unseen=0; if(baseTitle) document.title=baseTitle;
+      acquireWake();   // wake lock is dropped when screen sleeps — grab it again
+      refetch();       // pull anything we missed while throttled/asleep
+    }
+  });
+
+  /* demo view switch */
+  $$("#demoBar .switch button").forEach(b=>b.onclick=()=>{
+    if(b.dataset.go==="guest"){ location.hash=""; }
+    else { sessionStorage.setItem("rp_booth_ok","1"); if(alertsOn) unlockAudio(); location.hash="booth"; }
+    showView();
+  });
+
+  /* ---------------- toast ---------------- */
+  let toastT;
+  function toast(msg){ const el=$("#toast"); el.textContent=msg; el.classList.add("show"); clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("show"),2200); }
+
+  /* ---------------- boot ---------------- */
+  // restore gig name
+  try{ const g=localStorage.getItem("rp_gig"); if(g){ gigInput.value=g; } }catch(e){}
+  applyGig();
+  if(GIG_PARAM){ $("#guestGig").textContent = GIG_PARAM; }
+  restoreLibrary();
+  paintAlertBtn();
+  listeners.add(()=>{ if(location.hash.replace("#","")==="booth" && sessionStorage.getItem("rp_booth_ok")) renderBooth(); });
+  window.addEventListener("hashchange",showView);
+  initBackend().then(showView);
+  // refresh "time ago" every 30s
+  setInterval(()=>{ if(location.hash.replace("#","")==="booth") renderBooth(); },30000);
+})();
+</script>
+</body>
+</html>
