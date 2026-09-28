@@ -45,8 +45,8 @@ All config is a single `CONFIG` object at the top of `request-portal.html`:
 
 ## App structure (all inside request-portal.html)
 
-- **Two views**, switched by URL hash: default `#request` (guest form) and
-  `#booth` (dashboard, PIN-gated, session-remembered).
+- **Two views**, switched by URL hash: `#booth` (dashboard, PIN-gated,
+  session-remembered); any other URL shows the guest form.
 - **Backend layer** is pluggable: Supabase when keys exist, else an in-memory +
   BroadcastChannel demo store. `addRequest` / `setStatus` / `refetch` wrap both.
 - **Gig tagging:** the booth's QR bakes the current gig name into the guest link
