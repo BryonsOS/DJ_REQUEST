@@ -14,7 +14,8 @@ No framework, no build step. Everything is in `request-portal.html`.
   Declined / All tabs, plus a **Top requests** view ranked by demand.
 - **Library check** — matches each request against your track library and flags
   it *In library* (even if you only own a remix or extended mix) or links you to
-  **Grab on Tidal** if you don't have it.
+  **Grab on …** your store of choice (Tidal by default; Beatport, Beatsource,
+  Spotify, Apple Music, Amazon, YouTube Music or a custom link in booth Settings).
 - **Demand meter** — when several guests ask for the same track, it lights up.
 - **CSV export** — song tally and full request log, for building data over time.
 - **Live sync** — requests appear on the booth the instant a guest hits send.
@@ -71,6 +72,7 @@ Everything lives in one `CONFIG` object at the top of the HTML file:
 | `BOOTH_EMAIL` | Optional — pre-fills the booth sign-in email |
 | `BOOTH_PIN` | Demo mode only — the live booth uses Supabase Auth |
 | `GIG_NAME` | Default event label |
+| `STORE` | Default store for "not in library" links (booth Settings overrides it) |
 
 ## Development
 

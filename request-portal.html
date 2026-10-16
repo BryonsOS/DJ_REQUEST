@@ -59,7 +59,8 @@
     SUPABASE_ANON_KEY: "sb_publishable_ghD1UY99uWhrEyGqIzoRXA_wn3-_9kh",  // publishable key — safe in client code
     BOOTH_EMAIL:       "",              // optional: pre-fills the booth sign-in (password lives in Supabase Auth)
     BOOTH_PIN:         "6000",          // demo mode only — live booth signs in with Supabase Auth
-    GIG_NAME:          "Tonight's Set"
+    GIG_NAME:          "Tonight's Set",
+    STORE:             "tidal"          // default "not in library" store; change it per device in booth Settings
   };
 </script>
 
@@ -389,6 +390,7 @@
     <button class="tinybtn" id="qrBtn"><svg viewBox="0 0 24 24" fill="none"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>QR code</button>
     <button class="tinybtn" id="alertBtn" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 01-3.4 0" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="alertLabel">Alerts off</span></button>
     <button class="tinybtn" id="testBtn" title="Play a test alert">Test</button>
+    <button class="tinybtn" id="setBtn" title="Booth settings"><svg viewBox="0 0 24 24" fill="none"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="6" r="2" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="12" r="2" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="2" stroke="currentColor" stroke-width="2"/></svg>Settings</button>
     <button class="tinybtn hidden" id="signOutBtn" title="Sign the booth out">Sign out</button>
     <input type="file" id="libFile" accept=".csv,.txt" class="hidden">
   </div>
@@ -413,6 +415,29 @@
     <input id="pinInput" type="password" inputmode="numeric" maxlength="8" placeholder="••••" aria-label="PIN">
     <div class="err" id="pinErr"></div>
     <div class="row"><button class="submit" id="pinGo">Open booth</button></div>
+  </div>
+</div>
+
+<div id="setModal" class="scrim hidden">
+  <div class="modal">
+    <h3>Booth settings</h3>
+    <p>Where should "not in library" requests send you to buy or download the track? Saved on this device.</p>
+    <div class="field">
+      <label for="storeSel">Music store</label>
+      <select class="ctrl" id="storeSel"></select>
+    </div>
+    <div id="customStore" class="hidden">
+      <div class="field">
+        <label for="storeName">Store name</label>
+        <input class="ctrl" id="storeName" type="text" maxlength="30" placeholder="e.g. DJcity">
+      </div>
+      <div class="field">
+        <label for="storeUrl">Search link <span class="opt">— put {q} where the song goes</span></label>
+        <input class="ctrl" id="storeUrl" type="url" placeholder="https://example.com/search?q={q}">
+      </div>
+    </div>
+    <div class="err" id="setErr"></div>
+    <div class="row"><button class="ghost" id="setCancel" style="flex:1">Cancel</button><button class="submit" id="setSave" style="flex:1">Save</button></div>
   </div>
 </div>
 
@@ -576,9 +601,32 @@
   const VERSION=new Set(["extended","mix","remix","edit","radio","club","original","rework","version","clean","dirty","explicit","intro","outro","acapella","acappella","instrumental","inst","vip","bootleg","remaster","remastered","live","dub","mashup","short","long","cut","redrum","hype","transition","segue","reedit","flip","starter","quick","snippet","snip","mstr"]);
   const toks = s => norm(s).split(" ").filter(w=>w && !STOP.has(w) && !VERSION.has(w));
 
-  function tidalURL(song,artist){
+  /* ---------------- where "not in library" sends you (booth Settings) ---------------- */
+  // {q} is replaced with the URL-encoded "song artist" search.
+  const STORES = {
+    tidal:      {name:"Tidal",         url:"https://listen.tidal.com/search?q={q}"},
+    beatport:   {name:"Beatport",      url:"https://www.beatport.com/search?q={q}"},
+    beatsource: {name:"Beatsource",    url:"https://www.beatsource.com/search?q={q}"},
+    spotify:    {name:"Spotify",       url:"https://open.spotify.com/search/{q}"},
+    apple:      {name:"Apple Music",   url:"https://music.apple.com/search?term={q}"},
+    amazon:     {name:"Amazon Music",  url:"https://music.amazon.com/search/{q}"},
+    youtube:    {name:"YouTube Music", url:"https://music.youtube.com/search?q={q}"},
+    custom:     {name:"",              url:""}
+  };
+  let storeCfg = {id:CONFIG.STORE||"tidal", name:"", url:""};
+  try{ const s=JSON.parse(localStorage.getItem("rp_store")||"null"); if(s && STORES[s.id]) storeCfg=s; }catch(e){}
+  if(!STORES[storeCfg.id]) storeCfg={id:"tidal",name:"",url:""};
+  function currentStore(){
+    if(storeCfg.id==="custom" && /\{q\}/.test(storeCfg.url||"")) return {name:storeCfg.name||"store", url:storeCfg.url};
+    return STORES[storeCfg.id==="custom"?"tidal":storeCfg.id];
+  }
+  function storeURL(song,artist){
     const q=((song||"")+" "+(artist||"")).trim();
-    return "https://listen.tidal.com/search?q="+encodeURIComponent(q);
+    return currentStore().url.replace("{q}", encodeURIComponent(q));
+  }
+  function grabBadge(song,artist){
+    const st=currentStore();
+    return `<a class="badge b-grab" href="${esc(storeURL(song,artist))}" target="_blank" rel="noopener">Grab on ${esc(st.name)}<svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H9M17 7v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>`;
   }
 
   function parseCSV(text){
@@ -795,7 +843,7 @@
           .map(d=>`<span class="badge b-data">${esc(d)}</span>`).join("");
         libBadge=`<span class="badge b-in"><svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>In library</span>${ver}${data}`;
       } else {
-        libBadge=`<a class="badge b-grab" href="${tidalURL(r.song,r.artist)}" target="_blank" rel="noopener">Grab on Tidal<svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H9M17 7v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>`;
+        libBadge=grabBadge(r.song,r.artist);
       }
 
       const who = (r.guest||r.note) ? `<div class="who">${r.guest?`<strong>${esc(r.guest)}</strong>`:""}${r.note?`<span class="note">"${esc(r.note)}"</span>`:""}</div>` : "";
@@ -849,7 +897,7 @@
       const shop = libIndex && !m;
       const lib = !libIndex ? "" : (m
         ? `<span class="badge b-in"><svg viewBox="0 0 24 24" fill="none"><path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>In library</span>`+(m.bpm?`<span class="badge b-data">${esc(m.bpm)} BPM</span>`:"")
-        : `<a class="badge b-grab" href="${tidalURL(a.song,a.artist)}" target="_blank" rel="noopener">Grab on Tidal<svg viewBox="0 0 24 24" fill="none"><path d="M7 17L17 7M17 7H9M17 7v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></a>`);
+        : grabBadge(a.song,a.artist));
       return `<div class="rank${shop?' shop':''}">
         <div class="rk">${i+1}</div>
         <div class="rkbody">
@@ -1002,6 +1050,30 @@
   }
   $("#qrBtn").onclick=()=>{ buildQR(); $("#qrModal").classList.remove("hidden"); };
   $("#qrClose").onclick=()=>$("#qrModal").classList.add("hidden");
+
+  /* ---------------- settings ---------------- */
+  $("#storeSel").innerHTML = Object.entries(STORES).map(([id,s])=>`<option value="${id}">${id==="custom"?"Custom search link…":esc(s.name)}</option>`).join("");
+  function paintCustom(){ $("#customStore").classList.toggle("hidden", $("#storeSel").value!=="custom"); }
+  $("#storeSel").onchange=paintCustom;
+  $("#setBtn").onclick=()=>{
+    $("#storeSel").value=storeCfg.id; $("#storeName").value=storeCfg.name||""; $("#storeUrl").value=storeCfg.url||"";
+    $("#setErr").textContent=""; paintCustom(); $("#setModal").classList.remove("hidden");
+  };
+  $("#setCancel").onclick=()=>$("#setModal").classList.add("hidden");
+  $("#setSave").onclick=()=>{
+    const id=$("#storeSel").value;
+    const next={id, name:"", url:""};
+    if(id==="custom"){
+      next.name=$("#storeName").value.trim(); next.url=$("#storeUrl").value.trim();
+      if(!next.name){ $("#setErr").textContent="Give the store a name."; return; }
+      if(!/^https:\/\/[^\s]+$/i.test(next.url) || !next.url.includes("{q}")){ $("#setErr").textContent="Link must start with https:// and contain {q}."; return; }
+    }
+    storeCfg=next;
+    try{ localStorage.setItem("rp_store", JSON.stringify(storeCfg)); }catch(e){}
+    $("#setModal").classList.add("hidden");
+    toast("Not-in-library → "+currentStore().name);
+    renderBooth();
+  };
   $("#copyLink").onclick=()=>{ $("#qrLink").select(); navigator.clipboard&&navigator.clipboard.writeText($("#qrLink").value); toast("Link copied"); };
 
   /* ---------------- alert controls ---------------- */

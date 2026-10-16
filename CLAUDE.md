@@ -28,6 +28,10 @@ All config is a single `CONFIG` object at the top of `request-portal.html`:
 - `BOOTH_EMAIL` — optional; pre-fills the booth sign-in.
 - `BOOTH_PIN` — demo mode only. The live booth signs in with Supabase Auth.
 - `GIG_NAME` — default event label.
+- `STORE` — default "not in library" store (`tidal`, `beatport`, `beatsource`,
+  `spotify`, `apple`, `amazon`, `youtube`). The booth's **Settings** button
+  overrides it per device (saved in localStorage as `rp_store`), including a
+  custom search link with a `{q}` placeholder.
 
 ## Backend (Supabase)
 
@@ -66,8 +70,8 @@ All config is a single `CONFIG` object at the top of `request-portal.html`:
   in-library when the track's title words are ~all present in what the guest
   typed. Leans slightly toward recall (a DJ would rather see "you have it").
   Library is loaded from a CSV on the booth and cached in localStorage.
-- **Not-in-library** requests render a "Grab on Tidal" link
-  (`listen.tidal.com/search?q=`).
+- **Not-in-library** requests render a "Grab on <store>" link built from the
+  `STORES` table (`storeURL` / `grabBadge`); the store is chosen in booth Settings.
 - **Top requests tab:** aggregates all requests by song, ranks by count, flags
   the shopping-list (not-in-library) items, and exports CSV (song tally + full log).
 - **iPad booth features:** screen wake lock (re-acquired on visibility), full-
